@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+     xmlns:android="http://schemas.android.com/apk/res/android"
+     xmlns:app="http://schemas.android.com/apk/res-auto"
+     android:layout_height="match_parent"
+     android:layout_width="match_parent"
+     android:background="?attr/colorSurface"
+     android:padding="16dp"
+     android:orientation="vertical">
+
+    <TextView
+         android:layout_height="wrap_content"
+         android:layout_width="wrap_content"
+         android:layout_marginBottom="24dp"
+         android:textSize="24sp"
+         android:textColor="?attr/colorOnSurface"
+         android:text="dpt 函数抽离还原工具"
+         android:textStyle="bold" />
+
+    <com.google.android.material.textfield.TextInputLayout
+         android:layout_height="wrap_content"
+         android:layout_width="match_parent"
+         app:boxCornerRadiusTopEnd="12dp"
+         android:layout_marginBottom="16dp"
+         android:hint="请输入 APK 绝对路径"
+         app:boxCornerRadiusBottomStart="12dp"
+         app:boxCornerRadiusBottomEnd="12dp"
+         style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+         app:boxCornerRadiusTopStart="12dp"
+         android:id="@+id/pathInputLayout">
+
+        <com.google.android.material.textfield.TextInputEditText
+             android:layout_height="wrap_content"
+             android:layout_width="match_parent"
+             android:inputType="text"
+             android:id="@+id/etApkPath"
+             android:text="/storage/emulated/0/" />
+
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.button.MaterialButton
+         android:layout_height="56dp"
+         android:layout_width="match_parent"
+         android:layout_marginBottom="16dp"
+         app:cornerRadius="12dp"
+         style="@style/Widget.Material3.Button"
+         android:id="@+id/btnStart"
+         android:text="开始解析还原" />
+
+    <com.google.android.material.card.MaterialCardView
+         android:layout_height="0dp"
+         android:layout_width="match_parent"
+         app:cardBackgroundColor="?attr/colorSurfaceVariant"
+         style="@style/Widget.Material3.CardView.Filled"
+         app:cardCornerRadius="16dp"
+         android:layout_weight="1">
+
+        <ScrollView
+             android:layout_height="match_parent"
+             android:layout_width="match_parent"
+             android:padding="12dp"
+             android:id="@+id/logScrollView">
+
+            <TextView
+                 android:layout_height="wrap_content"
+                 android:layout_width="match_parent"
+                 android:fontFamily="monospace"
+                 android:textSize="12sp"
+                 android:textColor="?attr/colorOnSurfaceVariant"
+                 android:id="@+id/tvLog"
+                 android:text="[*] 等待任务输入...\n" />
+
+        </ScrollView>
+
+    </com.google.android.material.card.MaterialCardView>
+
+</LinearLayout>
