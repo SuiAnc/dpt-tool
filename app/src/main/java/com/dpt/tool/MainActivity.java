@@ -1,6 +1,14 @@
 package com.dpt.tool;
 
+import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.Signature;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -9,6 +17,9 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.text.TextUtils;
+import android.util.TypedValue;
+import android.view.View;
+import android.view.ViewGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -42,6 +53,9 @@ public class MainActivity extends AppCompatActivity {
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
+    // 填入你编译后的正版签名哈希（大写格式）
+    private static final String TARGET_SIGN_HASH = "D68F5385405B029EDF076FE34C2CA514794A4F5D9EA86CEDAC2C41133E9430F4";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -51,6 +65,12 @@ public class MainActivity extends AppCompatActivity {
         btnStart = findViewById(R.id.btnStart);
         tvLog = findViewById(R.id.tvLog);
         logScrollView = findViewById(R.id.logScrollView);
+
+        // 顶层防篡改水印覆盖
+        ViewGroup decorView = (ViewGroup) getWindow().getDecorView();
+        WatermarkViewGroup watermarkOverlay = new WatermarkViewGroup(this, "本工具免费 付费皆被坑");
+        decorView.post(() -> decorView.addView(watermarkOverlay, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)));
 
         btnStart.setOnClickListener(v -> {
             String path = etApkPath.getText().toString().trim();
@@ -65,6 +85,89 @@ public class MainActivity extends AppCompatActivity {
                 showPermissionRequestDialog();
             }
         });
+    }
+
+    /**
+     * 高性能防遮挡防篡改纯画布水印
+     */
+    private static class WatermarkViewGroup extends View {
+        private final String text;
+        private final Paint paint;
+
+        public WatermarkViewGroup(Context context, String text) {
+            super(context);
+            this.text = text;
+            this.paint = new Paint();
+            this.paint.setColor(Color.parseColor("#12000000")); 
+            this.paint.setTextSize(38);
+            this.paint.setStyle(Paint.Style.FILL);
+            this.paint.setAntiAlias(true);
+            this.paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+            
+            setClickable(false);
+            setFocusable(false);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                setForceDarkAllowed(false);
+            }
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            int width = getWidth();
+            int height = getHeight();
+            if (width <= 0 || height <= 0) return;
+
+            canvas.save();
+            canvas.rotate(-30, width / 2.0f, height / 2.0f);
+
+            int side = (int) Math.sqrt(width * width + height * height);
+            int stepX = 460; 
+            int stepY = 290; 
+
+            for (int x = -side; x < side; x += stepX) {
+                for (int y = -side; y < side; y += stepY) {
+                    canvas.drawText(text, x, y, paint);
+                }
+            }
+            canvas.restore();
+        }
+    }
+
+    /**
+     * 规范化正版签名完整性校验
+     */
+    private boolean verifyEnvironmentIntegrity() {
+        String currentSignHash = "";
+        try {
+            PackageManager pm = getPackageManager();
+            PackageInfo pi;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                pi = pm.getPackageInfo(getPackageName(), PackageManager.GET_SIGNING_CERTIFICATES);
+                if (pi.signingInfo != null) {
+                    Signature[] sigs = pi.signingInfo.getApkContentsSigners();
+                    if (sigs != null && sigs.length > 0) {
+                        currentSignHash = bytesToHex(MessageDigest.getInstance("SHA-256").digest(sigs[0].toByteArray()));
+                    }
+                }
+            } else {
+                pi = pm.getPackageInfo(getPackageName(), PackageManager.GET_SIGNATURES);
+                if (pi.signatures != null && pi.signatures.length > 0) {
+                    currentSignHash = bytesToHex(MessageDigest.getInstance("SHA-256").digest(pi.signatures[0].toByteArray()));
+                }
+            }
+        } catch (Exception ignored) {}
+
+        if (!TARGET_SIGN_HASH.equalsIgnoreCase(currentSignHash)) {
+            final String finalSign = currentSignHash;
+            uiHandler.post(() -> {
+                log("\n错误: 环境完整性校验失败");
+                log("签名 SHA-256 检验失败: " + (finalSign.isEmpty() ? "null" : finalSign));
+                Toast.makeText(MainActivity.this, "应用完整性校验失败，进程停止", Toast.LENGTH_LONG).show();
+            });
+            return false;
+        }
+        return true;
     }
 
     private boolean checkStoragePermission() {
@@ -107,7 +210,13 @@ public class MainActivity extends AppCompatActivity {
                 .setPositiveButton("同意并继续", (dialog, which) -> {
                     btnStart.setEnabled(false);
                     tvLog.setText("");
-                    executor.execute(() -> startUnpackPipeline(path));
+                    executor.execute(() -> {
+                        if (verifyEnvironmentIntegrity()) {
+                            startUnpackPipeline(path);
+                        } else {
+                            uiHandler.post(() -> btnStart.setEnabled(true));
+                        }
+                    });
                 })
                 .setNegativeButton("不同意", null)
                 .show();
@@ -120,14 +229,13 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-        private void startUnpackPipeline(String apkPath) {
+    private void startUnpackPipeline(String apkPath) {
         File apkFile = new File(apkPath);
         if (!apkFile.exists()) {
             log("APK 文件不存在: " + apkPath);
             uiHandler.post(() -> btnStart.setEnabled(true));
             return;
         }
-        
         
         if (apkFile.isDirectory()) {
             log("[-] 错误: 输入的是文件夹路径，请输入正确的 APK 文件路径！");
@@ -136,20 +244,17 @@ public class MainActivity extends AppCompatActivity {
         }
 
         String apkDir = apkFile.getParent();
-        
-        
         String rawName = apkFile.getName();
         int dotIndex = rawName.lastIndexOf(".");
         String apkName = (dotIndex == -1) ? rawName : rawName.substring(0, dotIndex);
         
         String timestamp = new SimpleDateFormat("yyyy-MM-dd-HH", Locale.getDefault()).format(new Date());
 
-        
         File workspace = new File(apkDir, "dpt_tmp_" + timestamp);
         File fixedDexDir = new File(workspace, "fixed_dexes");
         fixedDexDir.mkdirs();
 
-        File finalZip = new File(apkDir, apkName + "-[" + timestamp + "]-函数抽离壳.zip");
+        File finalZip = new File(apkDir, apkName + "-[" + timestamp + "]-自适应还原.zip");
 
         try {
             log("正在解压目标 APK...");
@@ -169,109 +274,171 @@ public class MainActivity extends AppCompatActivity {
             File pureDexZipFile = new File(workspace, "pure_dexes.zip");
             writeByteArrayToFile(pureDexZipFile, pureDexZipData);
 
-            log("正在扫描 assets/vwwwwwvwww 下的 SO 文件...");
-            File soRoot = new File(workspace, "assets" + File.separator + "vwwwwwvwww");
+            File assetsRoot = new File(workspace, "assets");
             byte[] aesKey = null;
-            if (soRoot.exists()) {
+            int xorKey = 0;
+            String shellVersionTip = "未知";
+            String appName = null;
+            String acfName = null;
+            String jniClsName = null;
+            Map<Integer, Map<Integer, byte[]>> insnsDatabase = null;
+
+            // ================= 阶段一：尝试优先解析【标准新版壳】 =================
+            File standardSoRoot = new File(assetsRoot, "vwwwwwvwww");
+            if (standardSoRoot.exists()) {
                 List<File> soFiles = new ArrayList<>();
-                findFilesRecursive(soRoot, ".so", soFiles);
+                findFilesRecursive(standardSoRoot, ".so", soFiles);
                 for (File so : soFiles) {
                     aesKey = extractKeyFromSo(so);
                     if (aesKey != null) break;
                 }
             }
 
-            File configFile = new File(workspace, "assets" + File.separator + "d_shell_data_001");
-            File insnsFile = new File(workspace, "assets" + File.separator + "OoooooOooo");
+            File configFile = new File(assetsRoot, "d_shell_data_001");
+            File insnsFile = new File(assetsRoot, "OoooooOooo");
 
-            int xorKey = 0;
-            boolean isNewVersion = false;
-            String shellVersionTip = "判定结果：【旧版函数抽离壳】";
-            
-            String appName = null;
-            String acfName = null;
-            String jniClsName = null;
+            if (configFile.exists() && aesKey != null) {
+                try {
+                    byte[] configCipher = readFileToByteArray(configFile);
+                    byte[] decryptedConfig = decryptAES_CBC(configCipher, aesKey);
+                    String jsonStr = new String(decryptedConfig, "UTF-8").trim();
+                    jsonStr = jsonStr.substring(jsonStr.indexOf("{"), jsonStr.lastIndexOf("}") + 1);
+                    
+                    long rawXorKey = jsonStr.contains("insns_xor_key") ? 
+                            Long.parseLong(fetchJsonValue(jsonStr, "insns_xor_key")) : 
+                            Long.parseLong(fetchJsonValue(jsonStr, "insnsXorKey"));
+                    xorKey = (int) (rawXorKey & 0xFFFFFFFFL);
 
-            if (configFile.exists()) {
-                isNewVersion = true;
-                shellVersionTip = "判定结果：【新版函数抽离壳】";
-                if (aesKey == null) {
-                    log("[-] 发现新版配置文件，但未提取到匹配的 AES 密钥，停止运行。");
-                    return;
-                }
-                byte[] configCipher = readFileToByteArray(configFile);
-                byte[] decryptedConfig = decryptAES_CBC(configCipher, aesKey);
-                String jsonStr = new String(decryptedConfig, "UTF-8").trim();
-                jsonStr = jsonStr.substring(jsonStr.indexOf("{"), jsonStr.lastIndexOf("}") + 1);
-                
-                long rawXorKey = 0;
-                if (jsonStr.contains("insns_xor_key")) {
-                    rawXorKey = Long.parseLong(fetchJsonValue(jsonStr, "insns_xor_key"));
-                } else {
-                    rawXorKey = Long.parseLong(fetchJsonValue(jsonStr, "insnsXorKey"));
-                }
-                xorKey = (int) (rawXorKey & 0xFFFFFFFFL);
+                    appName = fetchJsonStringValue(jsonStr, "app_name");
+                    if (appName == null) appName = fetchJsonStringValue(jsonStr, "appName");
+                    acfName = fetchJsonStringValue(jsonStr, "acf_name");
+                    if (acfName == null) acfName = fetchJsonStringValue(jsonStr, "acfName");
+                    jniClsName = fetchJsonStringValue(jsonStr, "jni_cls_name");
+                    if (jniClsName == null) jniClsName = fetchJsonStringValue(jsonStr, "jniClsName");
 
-                
-                appName = fetchJsonStringValue(jsonStr, "app_name");
-                if (appName == null) appName = fetchJsonStringValue(jsonStr, "appName");
-                
-                acfName = fetchJsonStringValue(jsonStr, "acf_name");
-                if (acfName == null) acfName = fetchJsonStringValue(jsonStr, "acfName");
-                
-                jniClsName = fetchJsonStringValue(jsonStr, "jni_cls_name");
-                if (jniClsName == null) jniClsName = fetchJsonStringValue(jsonStr, "jniClsName");
-            } else {
-                log("[+] 未检测到 d_shell_data_001，判定为旧版本壳。将直接进行原样指令回填。");
-                
-                
-                File oldAppFile = new File(workspace, "assets" + File.separator + "app_name");
-                File oldAcfFile = new File(workspace, "assets" + File.separator + "app_acf");
-                
-                if (oldAppFile.exists()) {
-                    appName = new String(readFileToByteArray(oldAppFile), "UTF-8").trim();
-                }
-                if (oldAcfFile.exists()) {
-                    acfName = new String(readFileToByteArray(oldAcfFile), "UTF-8").trim();
+                    if (insnsFile.exists()) {
+                        byte[] poolData = readFileToByteArray(insnsFile);
+                        insnsDatabase = parseInsnsPool(poolData, xorKey, false);
+                        if (insnsDatabase != null) {
+                            shellVersionTip = "判定结果：【新版本】";
+                        }
+                    }
+                } catch (Exception e) {
+                    insnsDatabase = null; // 发生异常则清除，使逻辑顺延到下一阶段
                 }
             }
 
-            if (!insnsFile.exists()) {
-                log("[-] 未找到被抽离的指令文件 OoooooOooo，停止运行。");
+            // ================= 阶段二：若新版未命中，尝试解析【标准旧版壳】 =================
+            if (insnsDatabase == null) {
+                File oldAppFile = new File(assetsRoot, "app_name");
+                File oldAcfFile = new File(assetsRoot, "app_acf");
+                
+                // 旧版壳特征：无加密的 OoooooOooo 与明文特征配置资产
+                if (insnsFile.exists() && (oldAppFile.exists() || oldAcfFile.exists() || !configFile.exists())) {
+                    try {
+                        if (oldAppFile.exists()) appName = new String(readFileToByteArray(oldAppFile), "UTF-8").trim();
+                        if (oldAcfFile.exists()) acfName = new String(readFileToByteArray(oldAcfFile), "UTF-8").trim();
+                        
+                        byte[] poolData = readFileToByteArray(insnsFile);
+                        // 旧版无指令流异或层，使用 xorKey = 0 进行正常读取
+                        insnsDatabase = parseInsnsPool(poolData, 0, false);
+                        if (insnsDatabase != null) {
+                            shellVersionTip = "判定结果：【旧版本】";
+                            aesKey = null; // 旧版无 AES 密钥层
+                            xorKey = 0;
+                        }
+                    } catch (Exception e) {
+                        insnsDatabase = null;
+                    }
+                }
+            }
+
+            // ================= 阶段三：若标准版本全失败，则启动【魔改资产自适应爆破】 =================
+            if (insnsDatabase == null && assetsRoot.exists()) {
+                log("[!] 标准特征未匹配，正在尝试...");
+                List<File> allFiles = new ArrayList<>();
+                findFilesRecursive(assetsRoot, "", allFiles);
+
+                // 1. 全盘迭代抽取魔改 SO 内的底层密钥
+                for (File f : allFiles) {
+                    if (f.getName().toLowerCase().endsWith(".so")) {
+                        byte[] scannedKey = extractKeyFromSo(f);
+                        if (scannedKey != null) {
+                            aesKey = scannedKey;
+                            break;
+                        }
+                    }
+                }
+
+                if (aesKey != null) {
+                    File detectedConfigFile = null;
+                    // 2. 盲测寻找被魔改混淆重命名的 JSON 配置块
+                    for (File assetFile : allFiles) {
+                        if (assetFile.getName().toLowerCase().endsWith(".so")) continue;
+                        try {
+                            byte[] rawContent = readFileToByteArray(assetFile);
+                            byte[] decryptedData = decryptAES_CBC(rawContent, aesKey);
+                            if (decryptedData == null) continue;
+
+                            String testStr = new String(decryptedData, "UTF-8").trim();
+                            if (testStr.contains("{") && testStr.contains("}") && (testStr.contains("app_name") || testStr.contains("appName"))) {
+                                testStr = testStr.substring(testStr.indexOf("{"), testStr.lastIndexOf("}") + 1);
+                                
+                                appName = fetchJsonStringValue(testStr, "app_name");
+                                if (appName == null) appName = fetchJsonStringValue(testStr, "appName");
+                                acfName = fetchJsonStringValue(testStr, "acf_name");
+                                if (acfName == null) acfName = fetchJsonStringValue(testStr, "acfName");
+                                jniClsName = fetchJsonStringValue(testStr, "jni_cls_name");
+                                if (jniClsName == null) jniClsName = fetchJsonStringValue(testStr, "jniClsName");
+                                
+                                long rawXorStr = testStr.contains("insns_xor_key") ? 
+                                        Long.parseLong(fetchJsonValue(testStr, "insns_xor_key")) : 
+                                        Long.parseLong(fetchJsonValue(testStr, "insnsXorKey"));
+                                xorKey = (int) (rawXorStr & 0xFFFFFFFFL);
+                                
+                                detectedConfigFile = assetFile;
+                                shellVersionTip = "判定结果：【未知版本 (" + assetFile.getName() + ")】";
+                                break;
+                            }
+                        } catch (Exception ignored) {}
+                    }
+
+                    // 3. 盲测寻找重定向或加深的指令流资产池
+                    for (File assetFile : allFiles) {
+                        if (assetFile.getName().toLowerCase().endsWith(".so") || assetFile.equals(detectedConfigFile)) continue;
+                        try {
+                            byte[] rawContent = readFileToByteArray(assetFile);
+                            byte[] decryptedData;
+                            try {
+                                decryptedData = decryptAES_CBC(rawContent, aesKey);
+                            } catch (Exception e) {
+                                decryptedData = rawContent; // 兼顾未对指令块加外包 AES 的部分变体
+                            }
+
+                            if (decryptedData != null && decryptedData.length > 4) {
+                                insnsDatabase = parseInsnsPool(decryptedData, xorKey, false);
+                                if (insnsDatabase == null) {
+                                    insnsDatabase = parseInsnsPool(decryptedData, xorKey, true); // 双切盲断模式
+                                }
+                                if (insnsDatabase != null) break;
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                }
+            }
+
+            if (insnsDatabase == null) {
+                log("[-] 错误: 无法匹配还原有效的加密或明文指令资产，停止运行。");
                 return;
             }
 
-            byte[] poolData = readFileToByteArray(insnsFile);
-            ByteBuffer poolBuf = ByteBuffer.wrap(poolData).order(ByteOrder.LITTLE_ENDIAN);
-            short version = poolBuf.getShort();
-            short dexCount = poolBuf.getShort();
-            poolBuf.position(4 + dexCount * 4);
-
-            Map<Integer, Map<Integer, byte[]>> insnsDatabase = new HashMap<>();
-            for (int d = 0; d < dexCount; d++) {
-                int methodCount = poolBuf.getShort() & 0xFFFF;
-                Map<Integer, byte[]> methodMap = new HashMap<>();
-                for (int m = 0; m < methodCount; m++) {
-                    int methodIdx = poolBuf.getInt();
-                    int dataSize = poolBuf.getInt();
-                    byte[] insnsData = new byte[dataSize];
-                    poolBuf.get(insnsData);
-                    methodMap.put(methodIdx, decryptInsnsBlock(insnsData, xorKey));
-                }
-                insnsDatabase.put(d, methodMap);
-            }
-
+            log("正在还原 DEX ...");
             File pureExtractedDir = new File(workspace, "pure_extracted");
             unzip(pureDexZipFile, pureExtractedDir);
 
             List<File> innerDexFiles = new ArrayList<>();
             findFilesRecursive(pureExtractedDir, ".dex", innerDexFiles);
-            
-            Collections.sort(innerDexFiles, (f1, f2) -> {
-                int n1 = getDexNumber(f1.getName());
-                int n2 = getDexNumber(f2.getName());
-                return Integer.compare(n1, n2);
-            });
+            Collections.sort(innerDexFiles, (f1, f2) -> Integer.compare(getDexNumber(f1.getName()), getDexNumber(f2.getName())));
 
             List<String> logs = new ArrayList<>();
             for (int i = 0; i < innerDexFiles.size(); i++) {
@@ -285,53 +452,39 @@ public class MainActivity extends AppCompatActivity {
                 if (insnsDatabase.containsKey(mapIdx)) {
                     restoreSingleDex(srcDex, destDex, insnsDatabase.get(mapIdx));
                     logs.add(newName + " 修复成功");
-                    log(newName + " 修复成功");
+                    log("[+] " + newName + " 修复成功");
                 } else {
                     copyFile(srcDex, destDex);
                     logs.add(newName + " 无抽取指令，直接复制");
-                    log(newName + " 无抽取指令，直接复制");
+                    log("[~] " + newName + " 无抽取指令，直接复制");
                 }
             }
 
-            
             File readme = new File(fixedDexDir, "说明.txt");
             StringBuilder readmeContent = new StringBuilder();
+            readmeContent.append("分析时间: ").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date())).append("\n");
+            readmeContent.append(shellVersionTip).append("\n");
+            readmeContent.append("AES 密钥: ").append(aesKey != null ? bytesToHex(aesKey) : "无").append("\n");
+            readmeContent.append(String.format("指令异或密钥: 0x%X\n\n", xorKey));
             
-            readmeContent.append("处理时间: ").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date())).append("\n");
-            readmeContent.append("壳版本类型: ").append(shellVersionTip).append("\n");
+            readmeContent.append("--- 解析结果 ---\n");
+            readmeContent.append("软件入口类：").append(appName != null && !appName.isEmpty() ? appName : "原软件无自定义入口类").append("\n");
+            readmeContent.append("软件工厂类：").append(acfName != null && !acfName.isEmpty() ? acfName : "原软件无自定义工厂类").append("\n");
+            readmeContent.append("加载类：").append(jniClsName != null ? jniClsName : "未检测到特征加载类").append("\n\n");
             
-            if (isNewVersion) {
-                readmeContent.append("AES 密钥: ").append(aesKey != null ? bytesToHex(aesKey) : "None").append("\n");
-                readmeContent.append(String.format("指令异或密钥: 0x%X\n\n", xorKey));
-                
-                readmeContent.append("--- 解析结果 ---\n");
-                readmeContent.append("软件入口类：").append(appName != null ? appName : "原软件无自定义入口类").append("\n");
-                readmeContent.append("软件工厂类：").append(acfName != null ? acfName : "原软件无自定义工厂类").append("\n");
-                readmeContent.append("加载类：").append(jniClsName != null ? jniClsName : "未检测到特征加载类").append("\n\n");
-                
-                if (jniClsName != null) {
-                    readmeContent.append(String.format("invoke-static {}, L%s;->clinit()V\n", jniClsName));
-                } else {
-                    readmeContent.append("invoke-static {}, L替换/JniBridge;->clinit()V\n");
-                }
-                readmeContent.append("请将上述Smali代码替换为空\n");
-                readmeContent.append("--------------------\n\n");
+            if (jniClsName != null) {
+                readmeContent.append(String.format("请将下列 Smali 代码引用清除：\ninvoke-static {}, L%s;->clinit()V\n", jniClsName));
             } else {
-                
-                readmeContent.append("\n--- 原软件类解析结果 ---\n");
-                readmeContent.append("软件入口类：").append(appName != null && !appName.isEmpty() ? appName : "原软件无自定义入口类").append("\n");
-                readmeContent.append("软件工厂类：").append(acfName != null && !acfName.isEmpty() ? acfName : "原软件无自定义工厂类").append("\n");
-                readmeContent.append("------------------------\n\n");
+                readmeContent.append("请清除对应的 JniBridge 初始化调用代码\n");
             }
+            readmeContent.append("--------------------\n\n");
             
             readmeContent.append("DEX 修复明细:\n");
-            for (String l : logs) {
-                readmeContent.append(" - ").append(l).append("\n");
-            }
+            for (String l : logs) readmeContent.append(" - ").append(l).append("\n");
 
-            PrintWriter writer = new PrintWriter(new OutputStreamWriter(new FileOutputStream(readme), "UTF-8"));
-            writer.print(readmeContent.toString());
-            writer.close();
+            try (PrintWriter writer = new PrintWriter(new OutputStreamWriter(new FileOutputStream(readme), "UTF-8"))) {
+                writer.print(readmeContent.toString());
+            }
 
             log("正在打包输出压缩包...");
             zipDirectory(fixedDexDir, finalZip);
@@ -349,6 +502,52 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * 解析和适配魔改壳特征指令流核心函数
+     */
+    private Map<Integer, Map<Integer, byte[]>> parseInsnsPool(byte[] poolData, int xorKey, boolean isNoHeaderMode) {
+        try {
+            Map<Integer, Map<Integer, byte[]>> insnsDatabase = new HashMap<>();
+            ByteBuffer poolBuf = ByteBuffer.wrap(poolData).order(ByteOrder.LITTLE_ENDIAN);
+            
+            int dexCount = 0;
+            if (isNoHeaderMode) {
+                dexCount = poolBuf.getShort() & 0xFFFF;
+            } else {
+                poolBuf.getShort(); // 跳过主版本号
+                dexCount = poolBuf.getShort() & 0xFFFF;
+            }
+
+            if (dexCount <= 0 || dexCount > 100 || (poolBuf.position() + dexCount * 4) > poolData.length) {
+                return null;
+            }
+
+            poolBuf.position(poolBuf.position() + dexCount * 4); // 越过偏移表项
+
+            for (int d = 0; d < dexCount; d++) {
+                if (poolBuf.position() + 2 > poolData.length) return null;
+                int methodCount = poolBuf.getShort() & 0xFFFF;
+                
+                Map<Integer, byte[]> methodMap = new HashMap<>();
+                for (int m = 0; m < methodCount; m++) {
+                    if (poolBuf.position() + 8 > poolData.length) return null;
+                    int methodIdx = poolBuf.getInt();
+                    int dataSize = poolBuf.getInt();
+                    
+                    if (dataSize < 0 || poolBuf.position() + dataSize > poolData.length) return null;
+                    byte[] insnsData = new byte[dataSize];
+                    poolBuf.get(insnsData);
+                    
+                    methodMap.put(methodIdx, decryptInsnsBlock(insnsData, xorKey));
+                }
+                insnsDatabase.put(d, methodMap);
+            }
+            return insnsDatabase;
+        } catch (Exception e) {
+            return null; 
+        }
+    }
+
     private void showResultDialog(String content) {
         ScrollView scrollView = new ScrollView(this);
         TextView textView = new TextView(this);
@@ -356,11 +555,17 @@ public class MainActivity extends AppCompatActivity {
         textView.setPadding(padding, padding, padding, padding);
         textView.setText(content);
         textView.setTextSize(14);
-        textView.setTextColor(com.google.android.material.R.attr.colorOnSurface);
+        
+        TypedValue typedValue = new TypedValue();
+        if (getTheme().resolveAttribute(com.google.android.material.R.attr.colorOnSurface, typedValue, true)) {
+            textView.setTextColor(typedValue.data);
+        } else {
+            textView.setTextColor(Color.DKGRAY);
+        }
         scrollView.addView(textView);
 
         new MaterialAlertDialogBuilder(this)
-                .setTitle("脱壳还原成功")
+                .setTitle("还原成功")
                 .setView(scrollView)
                 .setCancelable(false)
                 .setPositiveButton("确定", null)
@@ -563,7 +768,7 @@ public class MainActivity extends AppCompatActivity {
         if (list == null) return;
         for (File f : list) {
             if (f.isDirectory()) findFilesRecursive(f, ext, res);
-            else if (f.getName().toLowerCase().endsWith(ext)) res.add(f);
+            else if (ext.isEmpty() || f.getName().toLowerCase().endsWith(ext)) res.add(f);
         }
     }
 
