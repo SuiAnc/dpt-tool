@@ -14,7 +14,7 @@
          android:layout_marginBottom="24dp"
          android:textSize="24sp"
          android:textColor="?attr/colorOnSurface"
-         android:text="dpt 函数抽离还原工具"
+         android:text="落叶加固(DPT)还原工具"
          android:textStyle="bold" />
 
     <com.google.android.material.textfield.TextInputLayout
@@ -45,7 +45,7 @@
          app:cornerRadius="12dp"
          style="@style/Widget.Material3.Button"
          android:id="@+id/btnStart"
-         android:text="开始解析还原" />
+         android:text="开始处理" />
 
     <com.google.android.material.card.MaterialCardView
          android:layout_height="0dp"

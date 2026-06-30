@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">dpt</string>
+    <string name="app_name">落叶加固(DPT)还原工具</string>
     <style name="AppTheme" parent="Base.AppTheme"/>
     <style name="Base.AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
   </style>

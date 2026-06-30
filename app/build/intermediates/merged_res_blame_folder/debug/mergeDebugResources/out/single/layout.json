@@ -2,5 +2,9 @@
     {
         "merged": "com.dpt.tool.app-mergeDebugResources-32:/layout/activity_main.xml",
         "source": "com.dpt.tool.app-main-35:/layout/activity_main.xml"
+    },
+    {
+        "merged": "/data/user/0/com.tom.rv2ide/files/home/.gradle/daemon/9.0.0/com.dpt.tool.app-mergeDebugResources-32:/layout/activity_main.xml",
+        "source": "/data/user/0/com.tom.rv2ide/files/home/.gradle/daemon/9.0.0/com.dpt.tool.app-main-35:/layout/activity_main.xml"
     }
 ]

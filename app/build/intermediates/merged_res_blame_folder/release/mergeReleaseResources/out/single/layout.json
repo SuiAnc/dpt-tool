@@ -1,6 +1,6 @@
 [
     {
-        "merged": "/data/user/0/com.tom.rv2ide/files/home/.gradle/daemon/8.13/com.dpt.tool.app-mergeReleaseResources-32:/layout/activity_main.xml",
-        "source": "/data/user/0/com.tom.rv2ide/files/home/.gradle/daemon/8.13/com.dpt.tool.app-main-35:/layout/activity_main.xml"
+        "merged": "com.dpt.tool.app-mergeReleaseResources-32:/layout/activity_main.xml",
+        "source": "com.dpt.tool.app-main-35:/layout/activity_main.xml"
     }
 ]
