@@ -1,6 +1,8 @@
 # Dpt-Tool
 用于还原新版dpt-shell函数抽离壳
 
+本仓库已停止维护自dpt-shell(https://github.com/luoyesiqiu/dpt-shell)v2.14.0后的版本不受支持！
+
 基于Android Code Studio
 使用Java开发的
 dpt函数抽离壳还原工具
