@@ -2,7 +2,7 @@
 用于还原新版dpt-shell函数抽离壳
 
 本仓库已停止维护
-> - [TrickyStore](https://github.com/luoyesiqiu/dpt-shell)
+> - 自[dpt-shell](https://github.com/luoyesiqiu/dpt-shell) 2.14.0后的版本不再受支持
 
 基于Android Code Studio
 使用Java开发的
